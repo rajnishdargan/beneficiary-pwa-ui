@@ -72,6 +72,10 @@ const UploadDocumentEwallet = () => {
 	const [error, setError] = useState('');
 	const [isProcessing, setIsProcessing] = useState(false);
 	const toast = useToast();
+	const [iframeKey, setIframeKey] = useState(Date.now());
+
+	// Minimal ensureCleanWalletSession for the minimal fix
+	const ensureCleanWalletSession = () => true;
 
 	// Function to open the iframe and load the document selector
 	const init = async () => {
@@ -92,22 +96,21 @@ const UploadDocumentEwallet = () => {
 
 	// Function to open wallet UI
 	const openWalletUI = () => {
+		if (!ensureCleanWalletSession()) {
+			setError('User session not found. Please log in again.');
+			return;
+		}
 		localStorage.setItem('embeddedMode', 'true');
-
 		const walletToken = localStorage.getItem('walletToken');
 		const user = localStorage.getItem('user');
-
 		if (!walletToken || !user) {
 			setError('Wallet authentication data not found. Please ensure wallet is properly configured.');
 			return;
 		}
-
 		if (!VITE_EWALLET_IFRAME_SRC) {
 			setError('Wallet configuration is missing. Please check your environment variables.');
 			return;
 		}
-
-		// Validate the URL configuration
 		try {
 			new URL(VITE_EWALLET_IFRAME_SRC);
 		} catch (error) {
@@ -115,7 +118,7 @@ const UploadDocumentEwallet = () => {
 			setError('Invalid wallet URL configuration. Please check your environment variables.');
 			return;
 		}
-
+		setIframeKey(Date.now()); // Always use a new key
 		setIsIframeVisible(true);
 		setError('');
 	};
@@ -123,6 +126,7 @@ const UploadDocumentEwallet = () => {
 	// Function to close wallet UI
 	const closeWalletUI = () => {
 		setIsIframeVisible(false);
+		localStorage.removeItem('embeddedMode');
 	};
 
 	// Send authentication data to iframe
@@ -427,6 +431,17 @@ const UploadDocumentEwallet = () => {
 		};
 	}, [init, updateUserData, toast]);
 
+	// Listen for WALLET_IFRAME_READY from the wallet iframe and send WALLET_AUTH only after receiving it.
+	useEffect(() => {
+		const handleWalletReady = (event: MessageEvent) => {
+			if (event.data?.type === 'WALLET_IFRAME_READY') {
+				sendAuthToIframe();
+			}
+		};
+		window.addEventListener('message', handleWalletReady);
+		return () => window.removeEventListener('message', handleWalletReady);
+	}, []);
+
 	// Cleanup on unmount
 	useEffect(() => {
 		return () => {
@@ -497,14 +512,13 @@ const UploadDocumentEwallet = () => {
 					{/* Iframe Content */}
 					<Box flex={1} overflow="hidden" position="relative">
 						<iframe
+							key={iframeKey}
 							ref={iframeRef}
 							src={VITE_EWALLET_IFRAME_SRC}
 							title="Wallet Interface"
-							onLoad={() => {
-								// Send auth data once iframe loads
-								setTimeout(() => sendAuthToIframe());
-							}}
-							onError={() => {
+							onLoad={() => {}}
+							onError={(error) => {
+								console.error('Iframe failed to load:', error);
 								setError('Failed to load wallet interface. Please check your connection and try again.');
 							}}
 							allow="camera"
